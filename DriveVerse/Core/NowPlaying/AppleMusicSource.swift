@@ -50,6 +50,21 @@ import UIKit
 /// Emits nil when Apple Music has no now-playing item. No MusicKit or
 /// developer token is required for playback observation.
 final class AppleMusicSource {
+    private struct StoreMetadata: Equatable {
+        let title: String
+        let artist: String?
+    }
+
+    private struct ITunesLookupResponse: Decodable {
+        let results: [ITunesLookupTrack]
+    }
+
+    private struct ITunesLookupTrack: Decodable {
+        let trackId: Int64?
+        let trackName: String?
+        let artistName: String?
+    }
+
     private let player = MPMusicPlayerController.systemMusicPlayer
     private let subject = CurrentValueSubject<NowPlayingState?, Never>(nil)
     let authStatusSubject = CurrentValueSubject<MediaAuthStatus, Never>(.unknown)
@@ -62,6 +77,8 @@ final class AppleMusicSource {
     private var artworkCacheKey: String?
     private var artworkCacheData: Data?
     private var displayArtworkCacheData: Data?
+    private var localizedStoreMetadata: [String: StoreMetadata] = [:]
+    private var metadataLookupsInFlight = Set<String>()
 
     func start() {
         guard !started else { return }
@@ -100,6 +117,8 @@ final class AppleMusicSource {
         artworkCacheKey = nil
         artworkCacheData = nil
         displayArtworkCacheData = nil
+        localizedStoreMetadata = [:]
+        metadataLookupsInFlight = []
         player.endGeneratingPlaybackNotifications()
     }
 
@@ -181,9 +200,24 @@ final class AppleMusicSource {
                 artworkCacheData = Self.compactArtworkData(item.artwork)
                 displayArtworkCacheData = Self.displayArtworkData(item.artwork)
             }
+
+            let rawStoreID = item.playbackStoreID
+            let storeID = rawStoreID.isEmpty || rawStoreID == "0" ? nil : rawStoreID
+
+            if let storeID,
+               localizedStoreMetadata[storeID] == nil,
+               !metadataLookupsInFlight.contains(storeID) {
+                requestLocalizedStoreMetadata(
+                    storeID: storeID,
+                    originalTitle: item.title ?? ""
+                )
+            }
+
+            let localized = storeID.flatMap { localizedStoreMetadata[$0] }
+
             return AppleMusicSnapshot(
-                title: item.title,
-                artist: item.artist,
+                title: localized?.title ?? item.title,
+                artist: localized?.artist ?? item.artist,
                 album: item.albumTitle,
                 artworkData: artworkCacheData,
                 displayArtworkData: displayArtworkCacheData,
@@ -198,6 +232,94 @@ final class AppleMusicSource {
         guard snapshot != lastSnapshot else { return }
         lastSnapshot = snapshot
         subject.send(AppleMusicStateMapper.state(from: snapshot, capturedAt: Date()))
+    }
+
+    /// When Apple Music exposes translated metadata in the current storefront
+    /// (for example "Hair Like Snow"), look up the same catalog item in several
+    /// East Asian storefronts and prefer a different localized title.
+    ///
+    /// The iTunes Lookup API uses the same numeric catalog IDs and requires no
+    /// developer token. Once resolved, the title is cached for this app session.
+    private func requestLocalizedStoreMetadata(storeID: String, originalTitle: String) {
+        guard !storeID.isEmpty,
+              storeID != "0",
+              !metadataLookupsInFlight.contains(storeID) else {
+            return
+        }
+
+        metadataLookupsInFlight.insert(storeID)
+        let storefronts = ["hk", "tw", "cn", "jp", "kr"]
+        let originalNormalized = LyricsMatcher.normalizeTitle(originalTitle)
+
+        func lookup(at index: Int) {
+            guard index < storefronts.count else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.metadataLookupsInFlight.remove(storeID)
+                }
+                return
+            }
+
+            var components = URLComponents(string: "https://itunes.apple.com/lookup")!
+            components.queryItems = [
+                URLQueryItem(name: "id", value: storeID),
+                URLQueryItem(name: "country", value: storefronts[index]),
+                URLQueryItem(name: "entity", value: "song"),
+            ]
+            guard let url = components.url else {
+                lookup(at: index + 1)
+                return
+            }
+
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 6
+            request.cachePolicy = .returnCacheDataElseLoad
+
+            URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
+                guard let self else { return }
+
+                guard let data,
+                      let response = try? JSONDecoder().decode(ITunesLookupResponse.self, from: data) else {
+                    lookup(at: index + 1)
+                    return
+                }
+
+                let track = response.results.first { candidate in
+                    guard let trackId = candidate.trackId else { return false }
+                    return String(trackId) == storeID
+                } ?? response.results.first
+
+                guard let track,
+                      let rawTitle = track.trackName else {
+                    lookup(at: index + 1)
+                    return
+                }
+
+                let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalized = LyricsMatcher.normalizeTitle(title)
+
+                guard !title.isEmpty,
+                      !normalized.isEmpty,
+                      normalized != originalNormalized else {
+                    lookup(at: index + 1)
+                    return
+                }
+
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.localizedStoreMetadata[storeID] = StoreMetadata(
+                        title: title,
+                        artist: track.artistName
+                    )
+                    self.metadataLookupsInFlight.remove(storeID)
+                    // Force a fresh snapshot so AppModel sees the localized
+                    // title and runs the existing lyric search again.
+                    self.lastSnapshot = nil
+                    self.emit()
+                }
+            }.resume()
+        }
+
+        lookup(at: 0)
     }
 
     /// ActivityKit's complete dynamic state must stay below 4 KB. The live

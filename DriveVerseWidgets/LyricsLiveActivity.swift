@@ -498,7 +498,7 @@ private struct LiveLineText: View {
 private struct CompactMarqueeLine: View {
     let state: LyricsAttributes.ContentState
 
-    private let maximumViewportWidth: CGFloat = 88
+    private let maximumViewportWidth: CGFloat = 56
     private let minimumViewportWidth: CGFloat = 12
     private let shortLineSafetyPadding: CGFloat = 8
     private let tailRevealPadding: CGFloat = 18
