@@ -103,6 +103,9 @@ final class AppModel: ObservableObject {
     @Published var chineseConversion: ChineseConversion {
         didSet {
             defaults.set(chineseConversion.rawValue, forKey: Self.chineseConversionKey)
+#if os(iOS)
+            appleSource.chineseConversion = chineseConversion
+#endif
             refreshLyricsPresentation()
         }
     }
@@ -201,6 +204,7 @@ final class AppModel: ObservableObject {
         let applePublisher: AnyPublisher<NowPlayingState?, Never>
 #if os(iOS)
         let apple = AppleMusicSource()
+        apple.chineseConversion = chineseConversion
         appleSource = apple
         applePublisher = apple.statePublisher
 #else

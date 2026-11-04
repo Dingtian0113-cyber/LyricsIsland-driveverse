@@ -79,6 +79,13 @@ final class AppleMusicSource {
     private var displayArtworkCacheData: Data?
     private var localizedStoreMetadata: [String: StoreMetadata] = [:]
     private var metadataLookupsInFlight = Set<String>()
+    var chineseConversion: ChineseConversion = .preserve {
+        didSet {
+            guard oldValue != chineseConversion else { return }
+            lastSnapshot = nil
+            emit()
+        }
+    }
 
     func start() {
         guard !started else { return }
@@ -216,9 +223,9 @@ final class AppleMusicSource {
             let localized = storeID.flatMap { localizedStoreMetadata[$0] }
 
             return AppleMusicSnapshot(
-                title: localized?.title ?? item.title,
-                artist: localized?.artist ?? item.artist,
-                album: item.albumTitle,
+                title: convertedMetadata(localized?.title ?? item.title),
+                artist: convertedMetadata(localized?.artist ?? item.artist),
+                album: convertedMetadata(item.albumTitle),
                 artworkData: artworkCacheData,
                 displayArtworkData: displayArtworkCacheData,
                 durationSec: item.playbackDuration,
@@ -232,6 +239,11 @@ final class AppleMusicSource {
         guard snapshot != lastSnapshot else { return }
         lastSnapshot = snapshot
         subject.send(AppleMusicStateMapper.state(from: snapshot, capturedAt: Date()))
+    }
+
+    private func convertedMetadata(_ text: String?) -> String? {
+        guard let text else { return nil }
+        return ChineseTextConverter.convert(text, using: chineseConversion)
     }
 
     /// When Apple Music exposes translated metadata in the current storefront
@@ -248,7 +260,7 @@ final class AppleMusicSource {
         }
 
         metadataLookupsInFlight.insert(storeID)
-        let storefronts = ["hk", "tw", "cn", "jp", "kr"]
+        let storefronts = ["cn", "hk", "tw", "jp", "kr"]
         let originalNormalized = LyricsMatcher.normalizeTitle(originalTitle)
 
         func lookup(at index: Int) {
