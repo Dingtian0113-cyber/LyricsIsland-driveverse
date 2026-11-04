@@ -204,8 +204,8 @@ final class AppModel: ObservableObject {
         let applePublisher: AnyPublisher<NowPlayingState?, Never>
 #if os(iOS)
         let apple = AppleMusicSource()
-        apple.chineseConversion = chineseConversion
         appleSource = apple
+        apple.chineseConversion = chineseConversion
         applePublisher = apple.statePublisher
 #else
         applePublisher = Just<NowPlayingState?>(nil).eraseToAnyPublisher()
