@@ -86,7 +86,7 @@ enum WordTimedLyricsParser {
             let fallback = body
                 .replacingOccurrences(of: #"\([^)]*\)"#, with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"<[^>]*>"#, with: "", options: .regularExpression)
-            let text = original.isEmpty ? fallback : original
+            let text = fallback.trimmingCharacters(in: .whitespaces).isEmpty ? original : fallback
             guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
             return LyricsLine(
                 startTimeMs: start,
