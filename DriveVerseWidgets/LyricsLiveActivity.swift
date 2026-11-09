@@ -501,7 +501,7 @@ private struct CompactMarqueeLine: View {
     private let maximumViewportWidth: CGFloat = 56
     private let minimumViewportWidth: CGFloat = 12
     private let shortLineSafetyPadding: CGFloat = 8
-    private let tailRevealPadding: CGFloat = 18
+    private let tailRevealPadding: CGFloat = 30
 
     private var text: String { state.fullLine }
 
