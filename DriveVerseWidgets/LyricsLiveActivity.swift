@@ -495,13 +495,62 @@ private struct LiveLineText: View {
 
 /// Compact Dynamic Island always performs one line-start-to-tail pass. Word
 /// timing remains available to the Lock Screen but doesn't move this view.
-private struct CompactMarqueeLine: View {
-    let state: LyricsAttributes.ContentState
+private struct CompactMarqueeLayout: Layout {
+    var progress: CGFloat
 
     private let maximumViewportWidth: CGFloat = 56
     private let minimumViewportWidth: CGFloat = 12
     private let shortLineSafetyPadding: CGFloat = 8
-    private let tailRevealPadding: CGFloat = 30
+    private let height: CGFloat = 22
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else {
+            return CGSize(width: minimumViewportWidth, height: height)
+        }
+
+        let textSize = subview.sizeThatFits(.unspecified)
+        let viewportWidth = min(
+            maximumViewportWidth,
+            max(minimumViewportWidth, ceil(textSize.width) + shortLineSafetyPadding)
+        )
+
+        return CGSize(width: viewportWidth, height: height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+
+        let textSize = subview.sizeThatFits(.unspecified)
+        let overflow = max(0, textSize.width - bounds.width)
+        let p = min(1, max(0, progress))
+
+        subview.place(
+            at: CGPoint(
+                x: bounds.minX - overflow * p,
+                y: bounds.midY - textSize.height / 2
+            ),
+            anchor: .topLeading,
+            proposal: .unspecified
+        )
+    }
+}
+
+private struct CompactMarqueeLine: View {
+    let state: LyricsAttributes.ContentState
 
     private var text: String { state.fullLine }
 
@@ -509,55 +558,20 @@ private struct CompactMarqueeLine: View {
         max(0.12, Double(state.lineMarqueeDurationMs) / 1_000)
     }
 
-    private func measuredWidth(_ value: String) -> CGFloat {
-#if canImport(UIKit)
-        let base = UIFont.preferredFont(forTextStyle: .caption1)
-        let descriptor = base.fontDescriptor.withSymbolicTraits(.traitBold)
-            ?? base.fontDescriptor
-        let font = UIFont(descriptor: descriptor, size: base.pointSize)
-        return ceil((value as NSString).size(withAttributes: [.font: font]).width)
-#else
-        return CGFloat(max(value.count, 1)) * 9.5
-#endif
-    }
-
-    private var measuredTextWidth: CGFloat {
-        measuredWidth(text)
-    }
-
-    private var safeTextWidth: CGFloat {
-        measuredTextWidth + shortLineSafetyPadding
-    }
-
-    /// Avoid making the system widen both sides of the compact island for a
-    /// lyric that only needs a fraction of the available trailing region.
-    /// Keep extra room for glyph overhang and the island's outer clipping.
-    private var viewportWidth: CGFloat {
-        return min(maximumViewportWidth, max(minimumViewportWidth, safeTextWidth))
-    }
-
-    private var travel: CGFloat {
-        guard safeTextWidth > viewportWidth else { return 0 }
-        let glyphOverflow = max(0, measuredTextWidth - viewportWidth)
-        return glyphOverflow + tailRevealPadding
-    }
-
-    private var targetOffset: CGFloat {
-        return state.lineMarqueeAtEnd ? -travel : 0
-    }
-
     var body: some View {
-        Text(text)
-            .font(.caption.bold())
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .offset(x: targetOffset)
-            .frame(width: viewportWidth, height: 22, alignment: .leading)
-            .clipped()
-            .animation(
-                .linear(duration: linePassDuration),
-                value: state.lineMarqueeAtEnd
-            )
+        CompactMarqueeLayout(
+            progress: state.lineMarqueeAtEnd ? 1 : 0
+        ) {
+            Text(text)
+                .font(.caption.bold())
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .clipped()
+        .animation(
+            .linear(duration: linePassDuration),
+            value: state.lineMarqueeAtEnd
+        )
     }
 }
 
