@@ -644,7 +644,7 @@ final class LiveActivityController {
         let font = UIFont(descriptor: descriptor, size: base.pointSize)
         let text = String(line.prefix(100)) as NSString
         let safeWidth = ceil(text.size(withAttributes: [.font: font]).width) + 8
-        return safeWidth > 88
+        return safeWidth > 56
     }
 
     private static func content(
