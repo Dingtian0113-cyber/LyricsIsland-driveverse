@@ -737,6 +737,11 @@ final class LiveActivityController {
         guard words.reduce(0, { $0 + $1.original.count }) <= 100 else {
             return ("", fallback, "", false, 0, 0)
         }
+        let timedText = words.map(\.original).joined()
+        guard timedText == fallback else {
+            return ("", fallback, "", false, 0, 0)
+        }
+
         let completed = words[..<index].map(\.original).joined()
         let active = words[index].original
         let remaining = words[(index + 1)...].map(\.original).joined()
